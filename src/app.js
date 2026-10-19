@@ -8,8 +8,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { product } from "./catalog.js";
 import { validateOrder } from "./validation.js";
+
+function hasValidAdminKey(req, adminKey) {
+  const supplied = req.get("X-Admin-Key") || "";
+  const a = Buffer.from(supplied),
+    b = Buffer.from(adminKey || "");
+  return Boolean(
+    adminKey && a.length === b.length && timingSafeEqual(a, b),
+  );
+}
+
 export function createApp({
   orders,
+  sendOrderEmail,
   allowedOrigin = process.env.FRONTEND_ORIGIN || "http://localhost:5173",
   adminKey = process.env.ADMIN_API_KEY,
 } = {}) {
@@ -120,6 +131,16 @@ export function createApp({
           }
           throw e;
         }
+        if (sendOrderEmail) {
+          try {
+            await sendOrderEmail(order);
+          } catch (emailError) {
+            console.error(
+              `Order email failed for ${order.orderNumber}:`,
+              emailError.name,
+            );
+          }
+        }
         return res.status(201).json(publicOrder(order));
       } catch (e) {
         next(e);
@@ -128,10 +149,7 @@ export function createApp({
   );
   app.get("/api/admin/orders", async (req, res, next) => {
     try {
-      const supplied = req.get("X-Admin-Key") || "";
-      const a = Buffer.from(supplied),
-        b = Buffer.from(adminKey || "");
-      if (!adminKey || a.length !== b.length || !timingSafeEqual(a, b))
+      if (!hasValidAdminKey(req, adminKey))
         return res.status(401).json({ message: "Unauthorized" });
       if (!orders)
         return res.status(503).json({ message: "Database unavailable" });

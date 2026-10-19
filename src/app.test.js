@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 import { createApp } from "./app.js";
+import { buildOrderEmail } from "./email.js";
 const body = {
   name: "Test Customer",
   phone: "0912345678",
@@ -114,6 +115,62 @@ test("admin endpoint requires secret and accepts configured key", async () => {
     ).status,
     200,
   );
+});
+test("a new order sends one email with the complete saved order", async () => {
+  const orders = memoryOrders();
+  const emailed = [];
+  const app = createApp({
+    orders,
+    sendOrderEmail: async (order) => emailed.push(order),
+  });
+  const key = "12345678-1234-4321-1234-123456789088";
+  const first = await request(app)
+    .post("/api/orders")
+    .set("Idempotency-Key", key)
+    .send(body);
+  assert.equal(first.status, 201);
+  assert.equal(emailed.length, 1);
+  assert.equal(emailed[0].name, body.name);
+  assert.equal(emailed[0].address, body.address);
+  assert.equal(emailed[0].total, 1450);
+  assert.equal(emailed[0].paymentMethod, "cash-on-delivery");
+  const retry = await request(app)
+    .post("/api/orders")
+    .set("Idempotency-Key", key)
+    .send(body);
+  assert.equal(retry.status, 200);
+  assert.equal(emailed.length, 1);
+});
+test("order email includes every order field and escapes customer HTML", () => {
+  const message = buildOrderEmail({
+    ...body,
+    name: "Test <Customer>",
+    orderNumber: "IFT-TEST-001",
+    status: "pending",
+    total: 1450,
+    currency: "TWD",
+    jars: 6,
+    paymentMethod: "cash-on-delivery",
+    productId: "organic-islet-fruit-tea",
+    createdAt: new Date("2026-10-20T08:00:00.000Z"),
+  });
+  for (const expected of [
+    "IFT-TEST-001",
+    "Test <Customer>",
+    body.phone,
+    body.country,
+    body.city,
+    body.district,
+    body.address,
+    "Cash on Delivery",
+    "6 jars",
+    "TWD 1450",
+    "cash-on-delivery",
+    "pending",
+  ])
+    assert.match(message.text, new RegExp(expected));
+  assert.doesNotMatch(message.html, /Test <Customer>/);
+  assert.match(message.html, /Test &lt;Customer&gt;/);
 });
 test("catalog and malformed JSON handling", async () => {
   const app = createApp();

@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { MongoClient } from "mongodb";
 import { createApp } from "./app.js";
+import { createOrderEmailSender } from "./email.js";
 if (
   process.env.NODE_ENV === "production" &&
   (!process.env.ADMIN_API_KEY || process.env.ADMIN_API_KEY.length < 32)
@@ -19,7 +20,8 @@ try {
   await orders.createIndex({ idempotencyKey: 1 }, { unique: true });
   await orders.createIndex({ orderNumber: 1 }, { unique: true });
   await orders.createIndex({ createdAt: -1 });
-  const server = createApp({ orders }).listen(
+  const sendOrderEmail = createOrderEmailSender();
+  const server = createApp({ orders, sendOrderEmail }).listen(
     Number(process.env.PORT) || 4000,
     () =>
       console.log(
